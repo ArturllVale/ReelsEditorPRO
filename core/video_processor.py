@@ -26,15 +26,10 @@ def get_video_info(filepath):
     has_audio = "Audio:" in output
     return w, h, duration, has_audio
 
-def editar_video(video_path: str, output_dir: str, config: dict, queue=None):
-    video_path = Path(video_path)
-    output_dir = Path(output_dir)
-    output_filename = f"edited_{video_path.name}"
-    output_path = output_dir / output_filename
-    
-    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-    vid_w, vid_h, duration, has_audio = get_video_info(video_path)
-    
+def build_ffmpeg_command(video_path, output_path, config, vid_w, vid_h, has_audio, ffmpeg_exe=None):
+    if ffmpeg_exe is None:
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+
     inputs = ["-i", str(video_path)]
     filters = []
     
@@ -47,8 +42,9 @@ def editar_video(video_path: str, output_dir: str, config: dict, queue=None):
         curr_video = "[v_mir]"
         
     # 2. Overlay
-    if config.get("enable_overlay", False) and config.get("overlay_path") and os.path.exists(config.get("overlay_path")):
-        inputs.extend(["-i", config.get("overlay_path")])
+    overlay_path = config.get("overlay_path")
+    if config.get("enable_overlay", False) and overlay_path and os.path.exists(overlay_path):
+        inputs.extend(["-i", overlay_path])
         scale_w = max(1, int(vid_w * (config.get("overlay_scale", 10) / 100.0)))
         x_pct = config.get("overlay_x", 0) / 100.0
         y_pct = config.get("overlay_y", 0) / 100.0
@@ -62,8 +58,9 @@ def editar_video(video_path: str, output_dir: str, config: dict, queue=None):
         
     # 3. Extra Images
     for i, img in enumerate(config.get("extra_images", [])):
-        if os.path.exists(img["path"]):
-            inputs.extend(["-i", img["path"]])
+        img_path = img.get("path") if isinstance(img, dict) else None
+        if img_path and os.path.exists(img_path):
+            inputs.extend(["-i", img_path])
             scale_w = max(1, int(vid_w * (img.get("scale", 15) / 100.0)))
             x_pct = img.get("pos_x", 0) / 100.0
             y_pct = img.get("pos_y", 0) / 100.0
@@ -75,7 +72,7 @@ def editar_video(video_path: str, output_dir: str, config: dict, queue=None):
             input_idx += 1
             
     # 4. Texts
-    font_path = "C:/Windows/Fonts/arialbd.ttf".replace(':', '\\\\:')
+    font_path = "C:/Windows/Fonts/arialbd.ttf".replace(':', '\\:')
     for i, t in enumerate(config.get("texts", [])):
         txt = t.get("content", "")
         if not txt: continue
@@ -125,6 +122,19 @@ def editar_video(video_path: str, output_dir: str, config: dict, queue=None):
         cmd.extend(["-r", "30"])
         
     cmd.append(str(output_path))
+    return cmd
+
+
+def editar_video(video_path: str, output_dir: str, config: dict, queue=None):
+    video_path = Path(video_path)
+    output_dir = Path(output_dir)
+    output_filename = f"edited_{video_path.name}"
+    output_path = output_dir / output_filename
+
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    vid_w, vid_h, duration, has_audio = get_video_info(video_path)
+
+    cmd = build_ffmpeg_command(video_path, output_path, config, vid_w, vid_h, has_audio, ffmpeg_exe)
     
     # Run FFmpeg and capture progress
     process = subprocess.Popen(cmd, stderr=subprocess.PIPE, text=True, universal_newlines=True, encoding='utf-8', errors='ignore')
