@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import patch, MagicMock
 from core.video_processor import MetadataReader
 from domain.models import VideoMetadata

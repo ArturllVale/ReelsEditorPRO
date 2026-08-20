@@ -1,4 +1,3 @@
-import pytest
 from domain.models import Project
 from domain.composition import build_composition_plan
 

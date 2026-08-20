@@ -1,6 +1,6 @@
 import pytest
 from core.render_service import RenderService
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 @pytest.fixture
 def render_service():

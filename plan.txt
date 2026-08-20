@@ -1,0 +1,4 @@
+1. Remover imports mortos
+2. Refatorar responsabilidades residuais em MainWindow (`_get_current_config`, `_get_current_project` e a redundância nos dictionaries vs class models)
+3. Consertar inconsistências nos testes e verificar conditions de corrida.
+4. Elaborar relatório da auditoria pós-refatoração

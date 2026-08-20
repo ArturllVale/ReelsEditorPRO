@@ -1,8 +1,6 @@
-import os
-import pytest
 from pathlib import Path
-from core.video_processor import build_ffmpeg_command, editar_video
-from domain.models import Project, ExportSettings
+from core.video_processor import build_ffmpeg_command
+from domain.models import Project
 from domain.composition import build_composition_plan
 
 def test_build_ffmpeg_command_basic():

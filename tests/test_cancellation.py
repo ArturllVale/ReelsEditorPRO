@@ -1,6 +1,5 @@
 import pytest
 from core.render_scheduler import RenderScheduler, JobStatus
-from unittest.mock import patch
 
 @pytest.fixture
 def scheduler():
