@@ -1,7 +1,5 @@
-import pytest
-from pathlib import Path
 from core.video_processor import FFmpegCommandBuilder
-from domain.models import Project, ExportSettings
+from domain.models import Project
 from domain.composition import build_composition_plan
 
 def test_builder_creates_correct_command():

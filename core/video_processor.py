@@ -5,7 +5,6 @@ import json
 import logging
 from pathlib import Path
 import imageio_ffmpeg
-from proglog import ProgressBarLogger
 
 from domain.models import Project, ExportSettings, VideoMetadata
 from domain.composition import build_composition_plan, CompositionPlan, RenderElement

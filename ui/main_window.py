@@ -4,14 +4,13 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QGroupBox, QCheckBox, QLineEdit, QPushButton, QComboBox, 
                              QSpinBox, QProgressBar, QTextEdit, QLabel, QFileDialog, 
                              QHeaderView, QTableWidgetItem, QMessageBox, QGridLayout, QScrollArea, QTableWidget, QAbstractItemView)
-from PySide6.QtCore import Qt, QSize, QTimer
-from PySide6.QtGui import QAction, QIcon
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction
 
 from domain.models import Project
 from ui.custom_widgets import VideoGridArea
 from utils.config_manager import ConfigManager
 from core.render_service import RenderService
-from core.video_processor import editar_video
 
 class MainWindow(QMainWindow):
     def __init__(self):

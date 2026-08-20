@@ -1,11 +1,10 @@
-import os
 from pathlib import Path
 import numpy as np
 from moviepy import VideoFileClip
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QGridLayout, 
-                               QAbstractItemView, QPushButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem)
+                               QPushButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem)
 from PySide6.QtCore import Qt, Signal, QUrl, QSizeF
-from PySide6.QtGui import QImage, QPixmap, QPainter, QColor, QFont
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 

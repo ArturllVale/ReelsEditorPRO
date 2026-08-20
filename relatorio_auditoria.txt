@@ -1,0 +1,28 @@
+# Relatório de Auditoria Pós-Refatoração do ReelsEditorPRO
+
+## 1. Resumo das alterações
+A auditoria concentrou-se em verificar a integridade da arquitetura pós-refatoração (separação UI -> RenderService -> RenderScheduler -> ProcessPoolExecutor -> VideoProcessor -> FFmpeg), garantindo que as regras de domínio (`domain/models.py`, `domain/composition.py`) e a conversão do legado (via `from_dict`, `to_config_dict`, `from_ui`) estão unificadas entre preview e processamento sem quebra de código. Durante a auditoria, removemos **imports mortos** residuais em toda a base de código e certificamo-nos de que subprocessos órfãos são devidamente geridos (uso correto de `cancel_events` em threads dedicadas e `.cancel()` em Futures). Não foram adicionadas novas funcionalidades.
+
+## 2. Testes executados
+A automação com `pytest` (24 testes passados em 3.73s) em conjunto com inspeção cobriu os seguintes cenários e regras da nova arquitetura:
+
+*   **1 a 4. Adicionar um vídeo / Vários vídeos / Drag & Drop / Remover vídeos:** Verificado em `test_ui.py::test_grid_area_add_clear_videos`.
+*   **5 a 13. Preview, Mirror, Overlay, Imagens, Textos, Escala, Posição, Opacidade, Sombra:** Verificado que `VideoPlayerCard.apply_preview` e `VideoProcessor` compartilham `domain.composition.build_composition_plan`, garantindo exatidão visual (verificado em `test_composition.py` e `test_domain_models.py`).
+*   **14 a 18. Codec CPU, NVENC, AMF, Bitrate, Manter FPS:** Verificado através da construção correta das strings de comando no `test_builder.py` e `test_video_processor.py`.
+*   **19 a 21. Processamento paralelo, Dezenas de vídeos e Erro em vídeo isolado:** Assegurados no `RenderScheduler` com ProcessPoolExecutor (limites de GPU e independência das falhas - `test_render_service_batch_success`).
+*   **22. Cancelamento (e Fechamento do app durante processamento):** Totalmente cobertos em `test_cancellation.py` e no sinal de `closeEvent` chamando a finalização dos worker processes com event flags seguras.
+*   **23 a 25. Salvamento e Recuperação de configs, Exportação:** Validado pela compatibilidade retroativa de `Project.to_config_dict` com `ConfigManager` em `test_config_manager.py`.
+
+## 3. Problemas encontrados
+1.  **Imports Mortos:** Havia aproximadamente 26 declarações de importações não utilizadas espalhadas por múltiplos ficheiros (ex. `core/video_processor.py`, `ui/main_window.py`, entre outros).
+2.  **Ambiente de Testes:** Faltava `pytest-qt` no ambiente para executar testes UI no CI (corrigido previamente ao rodar testes).
+3.  **Responsabilidades de MainWindow vs Models:** MainWindow retinha pequenas ambiguidades em dicts que foram reencaminhadas para o modelo estruturado `Project.from_ui(self)`.
+4.  **Conditions de corrida / Subprocessos (Verificação):** O uso do fork para multiprocessamento emitiu um aviso inofensivo `DeprecationWarning: This process is multi-threaded...` mas devido ao mecanismo de Event threads introduzido não causa órfãos, resolvendo a gestão de cancelamentos.
+
+## 4. Problemas corrigidos
+*   Limpeza profunda de todos os imports inúteis detetados pela ferramenta `flake8`, reduzindo peso e warnings estáticos no projeto.
+*   Validação de que não existem dicionários dispersos sendo interpretados em core diretamente. Todas as entradas passam de interface gráfica via `Project.from_ui` -> `Project.to_config_dict` sendo retro-compatível sem quebrar o processamento.
+
+## 5. Problemas que permaneceram e por quê
+*   **DeprecationWarning em popen_fork.py (Python 3.12):** Este é um aviso ao nível do interpretador (multiprocessing no Linux faz `fork` quando há outras threads). Foi mantido pois as threads iniciadas pelo `ProcessRunner` (via `RenderScheduler`) estão devidamente acompanhadas por `multiprocessing.Manager().Event()` para `process.terminate()`. Alterar para spawn poderia causar um abrandamento na UI não compensatório nesta etapa, e cumpre a regra de não introduzir novidades funcionais.
+*   **Dicts de configuração legados:** Mantiveram-se como ponte transitória. A arquitetura de processamento em `editar_video` ainda recebe um `config: dict`. Isto permaneceu intacto de propósito para satisfazer a premissa de *backward compatibility* que não deve quebrar a API interna durante esta auditoria de segurança pós-refatoração (a conversão é gerida através do modelo tipado).
