@@ -1,6 +1,7 @@
 import concurrent.futures
 import uuid
 import multiprocessing
+import threading
 from enum import Enum
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
@@ -29,7 +30,7 @@ class RenderScheduler:
         self.executor = None
         self.futures = {}
         self.jobs = {}
-        self.manager = multiprocessing.Manager()
+        self.manager = None
         self.queue = None
         self.cancel_events = {}
 
@@ -40,6 +41,12 @@ class RenderScheduler:
         if gpu_accel:
             max_workers = min(max_workers, 2) # Example: limit GPU concurrency to 2
 
+        if self.executor is not None:
+            self.executor.shutdown(wait=True)
+        if self.manager is not None:
+            self.manager.shutdown()
+
+        self.manager = multiprocessing.Manager()
         self.executor = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
         self.futures = {}
         self.jobs = {}
@@ -63,17 +70,21 @@ class RenderScheduler:
     def _process_queue(self):
         updated_jobs = []
         if self.queue:
-            while not self.queue.empty():
-                try:
-                    vid_name, pct = self.queue.get_nowait()
-                    if vid_name in self.jobs:
-                        job = self.jobs[vid_name]
-                        if job.status == JobStatus.QUEUED or job.status == JobStatus.PROCESSING:
-                            job.status = JobStatus.PROCESSING
-                            job.progress = pct
-                            updated_jobs.append(job)
-                except Exception:
-                    break
+            try:
+                while not self.queue.empty():
+                    try:
+                        vid_name, pct = self.queue.get_nowait()
+                        if vid_name in self.jobs:
+                            job = self.jobs[vid_name]
+                            if job.status == JobStatus.QUEUED or job.status == JobStatus.PROCESSING:
+                                job.status = JobStatus.PROCESSING
+                                job.progress = pct
+                                updated_jobs.append(job)
+                    except Exception:
+                        break
+            except Exception:
+                # E.g. BrokenPipeError if manager was shut down but queue ref remained
+                pass
         return updated_jobs
 
     def get_progress_updates(self):
@@ -100,6 +111,14 @@ class RenderScheduler:
                         job.error = str(e)
                     updated_jobs.append(job)
 
+        if not self.futures and self.executor is not None:
+            self.executor.shutdown(wait=True)
+            self.executor = None
+            self.queue = None
+            if self.manager is not None:
+                self.manager.shutdown()
+                self.manager = None
+
         return updated_jobs
 
     def cancel(self):
@@ -117,11 +136,24 @@ class RenderScheduler:
                         if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
                             job.status = JobStatus.CANCELLED
 
-            # Use shutdown with wait=False but without process termination
-            # The processes will terminate because of the cancel_event
-            self.executor.shutdown(wait=False, cancel_futures=True)
+            # Shutdown in background to prevent UI block
+            def _cleanup(executor, manager):
+                try:
+                    executor.shutdown(wait=True, cancel_futures=True)
+                except Exception:
+                    pass
+                try:
+                    if manager is not None:
+                        manager.shutdown()
+                except Exception:
+                    pass
+
+            threading.Thread(target=_cleanup, args=(self.executor, self.manager), daemon=True).start()
+
             self.executor = None
+            self.manager = None
             self.futures = {}
+            self.queue = None
 
             # Clean up outputs for cancelled or processing jobs
             import os
