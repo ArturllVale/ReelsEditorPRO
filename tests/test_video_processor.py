@@ -1,4 +1,3 @@
-import os
 import pytest
 from pathlib import Path
 from core.video_processor import build_ffmpeg_command, editar_video

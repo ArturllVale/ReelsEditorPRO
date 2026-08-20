@@ -3,10 +3,10 @@ import multiprocessing
 from pathlib import Path
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QGroupBox, QCheckBox, QLineEdit, QPushButton, QComboBox, 
-                             QSpinBox, QProgressBar, QTextEdit, QLabel, QFileDialog, 
+                             QSpinBox, QProgressBar, QLabel, QFileDialog,
                              QHeaderView, QTableWidgetItem, QMessageBox, QGridLayout, QScrollArea, QTableWidget, QAbstractItemView)
-from PySide6.QtCore import Qt, QSize, QTimer
-from PySide6.QtGui import QAction, QIcon
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QAction
 from concurrent.futures import ProcessPoolExecutor
 
 from ui.custom_widgets import VideoGridArea
@@ -208,9 +208,7 @@ class MainWindow(QMainWindow):
         
         right_layout.addWidget(group_export)
         
-        self.txt_log = QTextEdit()
-        self.txt_log.hide() # Ocultado a pedido do usuario
-        right_layout.addWidget(self.txt_log)
+
         
         self.btn_start = QPushButton("🚀 INICIAR")
         self.btn_start.setObjectName("btn_start")
