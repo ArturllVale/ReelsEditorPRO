@@ -116,6 +116,8 @@ class VideoPlayerCard(QWidget):
 
     def apply_preview(self, config):
         """Atualiza a camada de overlay transparente para bater com a exportação"""
+        if hasattr(config, 'to_config_dict'):
+            config = config.to_config_dict()
         self.current_config = config
         
         # Limpar overlay atual
