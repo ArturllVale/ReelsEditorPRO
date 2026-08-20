@@ -5,6 +5,9 @@ from pathlib import Path
 import imageio_ffmpeg
 from proglog import ProgressBarLogger
 
+from domain.models import Project, ExportSettings
+from domain.composition import build_composition_plan, CompositionPlan
+
 def get_video_info(filepath):
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
     cmd = [ffmpeg_exe, "-hide_banner", "-i", str(filepath)]
@@ -26,7 +29,7 @@ def get_video_info(filepath):
     has_audio = "Audio:" in output
     return w, h, duration, has_audio
 
-def build_ffmpeg_command(video_path, output_path, config, vid_w, vid_h, has_audio, ffmpeg_exe=None):
+def build_ffmpeg_command(video_path, output_path, plan: CompositionPlan, export_settings: ExportSettings, has_audio: bool, ffmpeg_exe=None):
     if ffmpeg_exe is None:
         ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
 
@@ -37,61 +40,46 @@ def build_ffmpeg_command(video_path, output_path, config, vid_w, vid_h, has_audi
     input_idx = 1
     
     # 1. Mirror
-    if config.get("enable_mirror", False):
+    if plan.enable_mirror:
         filters.append(f"{curr_video}hflip[v_mir]")
         curr_video = "[v_mir]"
         
-    # 2. Overlay
-    overlay_path = config.get("overlay_path")
-    if config.get("enable_overlay", False) and overlay_path and os.path.exists(overlay_path):
-        inputs.extend(["-i", overlay_path])
-        scale_w = max(1, int(vid_w * (config.get("overlay_scale", 10) / 100.0)))
-        x_pct = config.get("overlay_x", 0) / 100.0
-        y_pct = config.get("overlay_y", 0) / 100.0
-        
-        # Scale and format
-        filters.append(f"[{input_idx}:v]scale={scale_w}:-1,format=rgba[ovl{input_idx}]")
-        # Overlay
-        filters.append(f"{curr_video}[ovl{input_idx}]overlay=x=(W-w)*{x_pct}:y=(H-h)*{y_pct}[v_ovl{input_idx}]")
-        curr_video = f"[v_ovl{input_idx}]"
-        input_idx += 1
-        
-    # 3. Extra Images
-    for i, img in enumerate(config.get("extra_images", [])):
-        img_path = img.get("path") if isinstance(img, dict) else None
-        if img_path and os.path.exists(img_path):
-            inputs.extend(["-i", img_path])
-            scale_w = max(1, int(vid_w * (img.get("scale", 15) / 100.0)))
-            x_pct = img.get("pos_x", 0) / 100.0
-            y_pct = img.get("pos_y", 0) / 100.0
-            opacity = img.get("opacity", 100) / 100.0
+    # Iterate over elements from the composition plan
+    for i, element in enumerate(plan.elements):
+        if element.type == "image":
+            if os.path.exists(element.content):
+                inputs.extend(["-i", element.content])
+
+                # Use pre-calculated values from plan
+                scale_w = element.image_width
+                x_pct = element.x_pct
+                y_pct = element.y_pct
+                opacity = element.opacity
+
+                filters.append(f"[{input_idx}:v]scale={scale_w}:-1,format=rgba,colorchannelmixer=aa={opacity}[eimg{input_idx}]")
+                filters.append(f"{curr_video}[eimg{input_idx}]overlay=x=(W-w)*{x_pct}:y=(H-h)*{y_pct}[v_eimg{input_idx}]")
+                curr_video = f"[v_eimg{input_idx}]"
+                input_idx += 1
+
+        elif element.type == "text":
+            txt = element.content
+            if not txt: continue
             
-            filters.append(f"[{input_idx}:v]scale={scale_w}:-1,format=rgba,colorchannelmixer=aa={opacity}[eimg{input_idx}]")
-            filters.append(f"{curr_video}[eimg{input_idx}]overlay=x=(W-w)*{x_pct}:y=(H-h)*{y_pct}[v_eimg{input_idx}]")
-            curr_video = f"[v_eimg{input_idx}]"
-            input_idx += 1
+            f_size = element.font_size
+            color = element.color
+            opacity = element.opacity
+            x_pct = element.x_pct
+            y_pct = element.y_pct
             
-    # 4. Texts
-    font_path = "C:/Windows/Fonts/arialbd.ttf".replace(':', '\\:')
-    for i, t in enumerate(config.get("texts", [])):
-        txt = t.get("content", "")
-        if not txt: continue
-        
-        f_size = t.get("size", 50)
-        color = t.get("color", "white")
-        opacity = t.get("opacity", 100) / 100.0
-        x_pct = t.get("x", 50) / 100.0
-        y_pct = t.get("y", 50) / 100.0
-        
-        drawtext = f"drawtext=text='{txt}':font='Arial':fontsize={f_size}:fontcolor={color}@{opacity}"
-        # X and Y in drawtext: tw=text width, th=text height. We want pos_x to control the box.
-        drawtext += f":x=(w-tw)*{x_pct}:y=(h-th)*{y_pct}"
-        
-        if t.get("shadow", True):
-            drawtext += f":shadowcolor=black@{opacity}:shadowx=2:shadowy=2"
+            # Use fixed font for FFmpeg (Arial is assumed here, but could be dynamic)
+            drawtext = f"drawtext=text='{txt}':font='Arial':fontsize={f_size}:fontcolor={color}@{opacity}"
+            drawtext += f":x=(w-tw)*{x_pct}:y=(h-th)*{y_pct}"
             
-        filters.append(f"{curr_video}{drawtext}[v_txt{i}]")
-        curr_video = f"[v_txt{i}]"
+            if element.shadow:
+                drawtext += f":shadowcolor=black@{opacity}:shadowx=2:shadowy=2"
+
+            filters.append(f"{curr_video}{drawtext}[v_txt{i}]")
+            curr_video = f"[v_txt{i}]"
         
     # Build Final FFmpeg Command
     cmd = [ffmpeg_exe, "-y"]
@@ -108,17 +96,17 @@ def build_ffmpeg_command(video_path, output_path, config, vid_w, vid_h, has_audi
         cmd.extend(["-c:a", "aac"])
         
     # Codec and presets
-    codec = config.get("codec", "libx264")
+    codec = export_settings.codec
     cmd.extend(["-c:v", codec])
     
     if codec == "libx264":
         cmd.extend(["-preset", "ultrafast"])
         
-    bitrate = config.get("bitrate", "Original")
+    bitrate = export_settings.bitrate
     if bitrate != "Original":
         cmd.extend(["-b:v", bitrate])
         
-    if not config.get("keep_fps", True):
+    if not export_settings.keep_fps:
         cmd.extend(["-r", "30"])
         
     cmd.append(str(output_path))
@@ -134,7 +122,11 @@ def editar_video(video_path: str, output_dir: str, config: dict, queue=None):
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
     vid_w, vid_h, duration, has_audio = get_video_info(video_path)
 
-    cmd = build_ffmpeg_command(video_path, output_path, config, vid_w, vid_h, has_audio, ffmpeg_exe)
+    # Convert dictionary config to Project model and then to CompositionPlan
+    project = Project.from_dict(config)
+    plan = build_composition_plan(project, vid_w, vid_h)
+
+    cmd = build_ffmpeg_command(video_path, output_path, plan, project.export_settings, has_audio, ffmpeg_exe)
     
     # Run FFmpeg and capture progress
     process = subprocess.Popen(cmd, stderr=subprocess.PIPE, text=True, universal_newlines=True, encoding='utf-8', errors='ignore')
@@ -150,7 +142,7 @@ def editar_video(video_path: str, output_dir: str, config: dict, queue=None):
             
     process.wait()
     if process.returncode != 0:
-        raise Exception("FFmpeg error")
+        raise Exception(f"FFmpeg error: {process.stderr.read() if process.stderr else ''}")
         
     if queue:
         queue.put((video_path.name, 100))

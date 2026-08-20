@@ -2,6 +2,8 @@ import os
 import pytest
 from pathlib import Path
 from core.video_processor import build_ffmpeg_command, editar_video
+from domain.models import Project, ExportSettings
+from domain.composition import build_composition_plan
 
 def test_build_ffmpeg_command_basic():
     video_path = Path('/tmp/test_video.mp4')
@@ -15,7 +17,10 @@ def test_build_ffmpeg_command_basic():
         'bitrate': 'Original',
         'keep_fps': True
     }
-    cmd = build_ffmpeg_command(video_path, output_path, config, 1920, 1080, has_audio=True, ffmpeg_exe='ffmpeg')
+    project = Project.from_dict(config)
+    plan = build_composition_plan(project, 1920, 1080)
+
+    cmd = build_ffmpeg_command(video_path, output_path, plan, project.export_settings, has_audio=True, ffmpeg_exe='ffmpeg')
     assert cmd[0] == 'ffmpeg'
     assert '-i' in cmd
     assert str(video_path) in cmd
@@ -51,7 +56,10 @@ def test_build_ffmpeg_command_full_effects(tmp_path):
         'keep_fps': False
     }
 
-    cmd = build_ffmpeg_command('/tmp/input.mp4', '/tmp/out.mp4', config, 1080, 1920, has_audio=True, ffmpeg_exe='ffmpeg')
+    project = Project.from_dict(config)
+    plan = build_composition_plan(project, 1080, 1920)
+
+    cmd = build_ffmpeg_command('/tmp/input.mp4', '/tmp/out.mp4', plan, project.export_settings, has_audio=True, ffmpeg_exe='ffmpeg')
 
     filter_arg = cmd[cmd.index('-filter_complex') + 1]
     assert 'hflip' in filter_arg
@@ -59,6 +67,7 @@ def test_build_ffmpeg_command_full_effects(tmp_path):
     assert 'overlay=x=(W-w)*0.1:y=(H-h)*0.2' in filter_arg
     assert 'colorchannelmixer=aa=0.8' in filter_arg
     assert "drawtext=text='Hello World'" in filter_arg
+    # The font size calculation: base_size * (target_width / 1080) -> 60 * (1080 / 1080.0) -> 60
     assert 'fontsize=60' in filter_arg
     assert 'fontcolor=yellow@0.9' in filter_arg
     assert 'shadowcolor=black@0.9' in filter_arg

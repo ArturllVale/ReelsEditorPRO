@@ -114,19 +114,21 @@ class VideoPlayerCard(QWidget):
         else:
             self.lbl_status.setStyleSheet("font-size: 8pt; color: #E0E0E0;")
 
-    def apply_preview(self, config):
-        """Atualiza a camada de overlay transparente para bater com a exportação"""
-        if hasattr(config, 'to_config_dict'):
-            config = config.to_config_dict()
-        self.current_config = config
+    def apply_preview(self, project_or_config):
+        """Atualiza a camada de overlay usando o modelo de composição unificado."""
+        from domain.models import Project
+        from domain.composition import build_composition_plan
+        from ui.preview_renderer import PreviewRenderer
         
-        # Limpar overlay atual
-        pix = QPixmap(225, 400)
-        pix.fill(Qt.transparent)
-        painter = QPainter(pix)
-        
+        if hasattr(project_or_config, 'to_config_dict'):
+            project = project_or_config
+            self.current_config = project.to_config_dict()
+        else:
+            project = Project.from_dict(project_or_config)
+            self.current_config = project_or_config
+
         # Mirror da Thumbnail
-        if config.get("enable_mirror", False):
+        if project.composition.enable_mirror:
             if not self.base_pixmap.isNull():
                 img = self.base_pixmap.toImage().mirrored(True, False)
                 scaled_pix = QPixmap.fromImage(img).scaled(225, 400, Qt.KeepAspectRatio, Qt.SmoothTransformation)
@@ -138,66 +140,10 @@ class VideoPlayerCard(QWidget):
                 self.thumbnail_item.setPixmap(scaled_pix)
                 self.thumbnail_item.setPos((225 - scaled_pix.width()) / 2, (400 - scaled_pix.height()) / 2)
 
-        # Precisamos descobrir a dimensão real do vídeo renderizado no card (KeepAspectRatio)
-        # Assumindo que o QGraphicsVideoItem e QGraphicsPixmapItem centralizam
-        vid_w = 225
-        vid_h = 400
-        margin = 10 # Margem visual menor para o preview
-        # Desenho unificado para imagens
-        def draw_img(painter, ip, scale_pct, pos_x, pos_y, opacity=100):
-            if not ip or not os.path.exists(ip): return
-            img = QPixmap(ip)
-            if img.isNull(): return
-            w = max(1, int(vid_w * (scale_pct / 100.0)))
-            img = img.scaledToWidth(w, Qt.SmoothTransformation)
-            x = int((vid_w - img.width()) * (pos_x / 100.0))
-            y = int((vid_h - img.height()) * (pos_y / 100.0))
-            painter.setOpacity(opacity / 100.0)
-            painter.drawPixmap(x, y, img)
-            painter.setOpacity(1.0)
+        # Usar o CompositionPlan para desenhar o overlay
+        plan = build_composition_plan(project, 225, 400)
+        pix = PreviewRenderer.render(plan)
 
-        # Draw Overlay Principal
-        if config.get("enable_overlay", False) and config.get("overlay_path"):
-            draw_img(painter, config.get("overlay_path"), config.get("overlay_scale", 15), config.get("overlay_x", 0), config.get("overlay_y", 0))
-            
-        # Draw Imagens Extras
-        for e in config.get("extra_images", []):
-            draw_img(painter, e["path"], e["scale"], e.get("pos_x", 0), e.get("pos_y", 0), e.get("opacity", 100))
-            
-        # Draw Textos
-        for t in config.get("texts", []):
-            txt = t.get("content", "")
-            if not txt: continue
-            
-            f_size = max(8, int(t.get("size", 50) * (vid_w / 1080.0))) 
-            font = QFont("Arial", f_size, QFont.Bold)
-            painter.setFont(font)
-            
-            # Calcular boundingRect
-            fm = painter.fontMetrics()
-            br = fm.boundingRect(txt)
-            tw, th = br.width(), br.height()
-            
-            pos_x = t.get("x", 50)
-            pos_y = t.get("y", 50)
-            x = int((vid_w - tw) * (pos_x / 100.0))
-            y = int((vid_h - th) * (pos_y / 100.0)) + th
-            
-            # Opacidade
-            opacity = t.get("opacity", 100) / 100.0
-            painter.setOpacity(opacity)
-            
-            if t.get("shadow", True):
-                painter.setPen(QColor("black"))
-                painter.drawText(x+1, y+1, txt)
-                painter.drawText(x-1, y-1, txt)
-                
-            painter.setPen(QColor(t.get("color", "white")))
-            painter.drawText(x, y, txt)
-            
-            painter.setOpacity(1.0)
-
-        painter.end()
         self.overlay_item.setPixmap(pix)
 
 
