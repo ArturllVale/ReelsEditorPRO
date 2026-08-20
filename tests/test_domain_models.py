@@ -209,3 +209,23 @@ def test_project_from_ui(qapp):
     assert project.layers.overlay.enabled == window.chk_overlay.isChecked()
     assert project.export_settings.bitrate == window.cmb_bitrate.currentText()
     assert project.export_settings.keep_fps == window.chk_fps.isChecked()
+
+
+def test_export_settings_codecs_and_acceleration():
+    s_cpu = ExportSettings(codec="libx264")
+    s_nv = ExportSettings(codec="h264_nvenc")
+    s_amf = ExportSettings(codec="h264_amf")
+
+    assert s_cpu.acceleration_type == "CPU"
+    assert s_nv.acceleration_type == "NVIDIA"
+    assert s_amf.acceleration_type == "AMD"
+
+    assert not s_cpu.is_gpu_codec()
+    assert s_nv.is_gpu_codec()
+    assert s_amf.is_gpu_codec()
+
+    assert not ExportSettings.is_gpu_codec("libx264")
+    assert ExportSettings.is_gpu_codec("h264_nvenc")
+    assert ExportSettings.is_gpu_codec("h264_amf")
+
+    assert ExportSettings.MAX_GPU_WORKERS == 2

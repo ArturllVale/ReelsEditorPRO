@@ -65,3 +65,34 @@ def test_scheduler_lifecycle():
 
     finally:
         core.render_scheduler.editar_video = original
+
+
+def test_scheduler_worker_limits_by_codec():
+    original = core.render_scheduler.editar_video
+    core.render_scheduler.editar_video = dummy_editar_success
+
+    try:
+        scheduler = RenderScheduler()
+
+        # CPU codec: libx264 allows user-configured workers (e.g. 4)
+        scheduler.start(["v1.mp4"], "/tmp", {"codec": "libx264"}, 4)
+        assert scheduler.executor._max_workers == 4
+        scheduler.cancel()
+
+        # GPU NVIDIA codec: h264_nvenc limits max workers to 2
+        scheduler.start(["v1.mp4"], "/tmp", {"codec": "h264_nvenc"}, 4)
+        assert scheduler.executor._max_workers == 2
+        scheduler.cancel()
+
+        # GPU AMD codec: h264_amf limits max workers to 2
+        scheduler.start(["v1.mp4"], "/tmp", {"codec": "h264_amf"}, 4)
+        assert scheduler.executor._max_workers == 2
+        scheduler.cancel()
+
+        # GPU codec with 1 requested worker maintains 1
+        scheduler.start(["v1.mp4"], "/tmp", {"codec": "h264_nvenc"}, 1)
+        assert scheduler.executor._max_workers == 1
+        scheduler.cancel()
+
+    finally:
+        core.render_scheduler.editar_video = original

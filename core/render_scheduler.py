@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Optional, Dict, Any
 from pathlib import Path
 from core.video_processor import editar_video
+from domain.models import ExportSettings
 
 class JobStatus(Enum):
     QUEUED = "QUEUED"
@@ -35,11 +36,15 @@ class RenderScheduler:
         self.cancel_events = {}
 
     def start(self, videos, output_dir, config, num_workers):
-        gpu_accel = config.get("export", {}).get("use_gpu_acceleration", False)
-        # Handle concurrency: limit for GPU if needed
+        codec = config.get("codec") if isinstance(config, dict) else None
+        if not codec and isinstance(config, dict):
+            codec = config.get("export", {}).get("codec", "libx264")
+        if not codec:
+            codec = "libx264"
+
         max_workers = num_workers
-        if gpu_accel:
-            max_workers = min(max_workers, 2) # Example: limit GPU concurrency to 2
+        if ExportSettings.is_gpu_codec(codec):
+            max_workers = min(max_workers, ExportSettings.MAX_GPU_WORKERS)
 
         if self.executor is not None:
             self.executor.shutdown(wait=True)
