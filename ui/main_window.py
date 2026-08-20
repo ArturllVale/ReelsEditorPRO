@@ -1,5 +1,4 @@
 import os
-import multiprocessing
 from pathlib import Path
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QGroupBox, QCheckBox, QLineEdit, QPushButton, QComboBox, 
@@ -7,10 +6,10 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QHeaderView, QTableWidgetItem, QMessageBox, QGridLayout, QScrollArea, QTableWidget, QAbstractItemView)
 from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QAction, QIcon
-from concurrent.futures import ProcessPoolExecutor
 
 from ui.custom_widgets import VideoGridArea
 from utils.config_manager import ConfigManager
+from core.render_service import RenderService
 from core.video_processor import editar_video
 
 class MainWindow(QMainWindow):
@@ -18,16 +17,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("ReelsEditorPRO - Cyberpunk Edition")
         self.setMinimumSize(1200, 800)
-        
         self.config_manager = ConfigManager()
-        self.executor = None
-        self.futures = []
-        
-        self.manager = multiprocessing.Manager()
-        self.progress_queue = self.manager.Queue()
+        self.render_service = RenderService()
         self.video_progress = {}
-        self.timer = QTimer()
-        self.timer.timeout.connect(self._check_progress)
 
         self._create_menu()
         self._setup_ui()
@@ -242,6 +234,12 @@ class MainWindow(QMainWindow):
         self.spin_overlay_y.valueChanged.connect(self._update_previews)
         self.spin_scale.valueChanged.connect(self._update_previews)
 
+        self.render_service.progress_updated.connect(self._on_progress_updated)
+        self.render_service.log_updated.connect(self._update_log_display)
+        self.render_service.video_status_updated.connect(self._on_video_status_updated)
+        self.render_service.processing_finished.connect(self._on_processing_finished)
+        self.render_service.processing_cancelled.connect(self._on_processing_cancelled)
+
     def _get_current_config(self):
         codec_map = {"CPU (libx264)": "libx264", "GPU NVIDIA (h264_nvenc)": "h264_nvenc", "GPU AMD (h264_amf)": "h264_amf"}
         extra_imgs = []
@@ -391,26 +389,18 @@ class MainWindow(QMainWindow):
         
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat(f"Iniciando {len(videos)} vídeos...")
-        self.executor = ProcessPoolExecutor(max_workers=num_workers)
         
-        for video_path in videos:
-            self.video_progress[Path(video_path).name] = 0
-            future = self.executor.submit(editar_video, video_path, output_dir, config, self.progress_queue)
-            self.futures.append(future)
-            
-        self.timer.start(500)
+        self.render_service.start_processing(videos, output_dir, config, num_workers)
 
-    def _check_progress(self):
-        updated = False
-        while not self.progress_queue.empty():
-            try:
-                vid_name, pct = self.progress_queue.get_nowait()
-                self.video_progress[vid_name] = pct
-                updated = True
-            except: break
-        if updated: self._update_log_display()
 
-    def _update_log_display(self):
+
+    def _on_progress_updated(self, vid_name, pct):
+        self.video_progress[vid_name] = pct
+
+    def _update_log_display(self, progress_dict=None):
+        if progress_dict is not None:
+            self.video_progress = progress_dict
+
         total = len(self.video_progress)
         if total == 0: return
         
@@ -420,21 +410,21 @@ class MainWindow(QMainWindow):
         current_vid = min(completed + 1, total)
         self.progress_bar.setValue(avg_pct)
         self.progress_bar.setFormat(f"Convertendo vídeo {current_vid}/{total} - %p%")
-        
-        if completed == total:
-            self.timer.stop()
-            self.btn_start.setEnabled(True)
-            self.btn_cancel.setEnabled(False)
-            self.progress_bar.setFormat(f"Processamento Concluído! - 100%")
 
-    def _cancel_processing(self):
-        if self.executor:
-            try:
-                for proc in self.executor._processes.values(): proc.terminate()
-            except: pass
-            self.executor.shutdown(wait=False, cancel_futures=True)
-            self.executor = None
-        self.timer.stop()
+    def _on_video_status_updated(self, vid_name, status):
+        for card in self.grid_area.cards:
+            if Path(card.video_path).name == vid_name:
+                card.update_status(status)
+
+    def _on_processing_finished(self):
+        self.btn_start.setEnabled(True)
+        self.btn_cancel.setEnabled(False)
+        self.progress_bar.setFormat(f"Processamento Concluído! - 100%")
+
+    def _on_processing_cancelled(self):
         self.progress_bar.setFormat(f"Processamento CANCELADO!")
         self.btn_start.setEnabled(True)
         self.btn_cancel.setEnabled(False)
+
+    def _cancel_processing(self):
+        self.render_service.cancel_processing()
