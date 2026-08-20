@@ -1,4 +1,3 @@
-import multiprocessing
 from PySide6.QtCore import QObject, Signal, QTimer
 from pathlib import Path
 from core.render_scheduler import RenderScheduler
@@ -13,8 +12,6 @@ class RenderService(QObject):
     def __init__(self):
         super().__init__()
         self.scheduler = RenderScheduler()
-        self.manager = multiprocessing.Manager()
-        self.progress_queue = self.manager.Queue()
         self.video_progress = {}
 
         self.timer = QTimer(self)
@@ -26,7 +23,8 @@ class RenderService(QObject):
             name = Path(video_path).name
             self.video_progress[name] = 0
 
-        self.scheduler.start(videos, output_dir, config, self.progress_queue, num_workers)
+        # Start now doesn't need to take the self.progress_queue, it creates its own internally
+        self.scheduler.start(videos, output_dir, config, num_workers)
         self.timer.start(500)
 
     def cancel_processing(self):
@@ -35,36 +33,40 @@ class RenderService(QObject):
         self.processing_cancelled.emit()
 
     def _check_progress(self):
-        updated = False
-        while not self.progress_queue.empty():
-            try:
-                vid_name, pct = self.progress_queue.get_nowait()
-                self.video_progress[vid_name] = pct
-                self.progress_updated.emit(vid_name, pct)
-                updated = True
-            except:
-                break
+        updated_jobs = self.scheduler.get_progress_updates()
 
-        if updated:
+        has_updates = False
+        for job in updated_jobs:
+            # We map Job to video name for backwards compatibility in UI signals
+            vid_name = Path(job.input_path).name
+
+            # Emit progress only if it changes or job reaches completion
+            if self.video_progress.get(vid_name) != job.progress:
+                self.video_progress[vid_name] = job.progress
+                self.progress_updated.emit(vid_name, job.progress)
+                has_updates = True
+
+            # If job failed or completed, emit status update
+            # We check the enum values
+            if job.status.value == "COMPLETED":
+                self.video_status_updated.emit(vid_name, "Concluído")
+            elif job.status.value == "FAILED":
+                self.video_status_updated.emit(vid_name, "Falha")
+
+        if has_updates:
             self.log_updated.emit(self.video_progress.copy())
 
         if self.scheduler.is_finished():
-            # Process remaining items in queue just in case
-            while not self.progress_queue.empty():
-                try:
-                    vid_name, pct = self.progress_queue.get_nowait()
-                    self.video_progress[vid_name] = pct
-                    self.progress_updated.emit(vid_name, pct)
-                except:
-                    break
-
-            # Update final status from results
-            results = self.scheduler.get_results()
-            for res in results:
-                if res and res.get("status") == "success":
-                    self.video_status_updated.emit(res["file"], "Concluído")
-                elif res:
-                    self.video_status_updated.emit(res.get("file", "Desconhecido"), "Falha")
+            # Get any final remaining updates
+            final_updates = self.scheduler.get_progress_updates()
+            for job in final_updates:
+                vid_name = Path(job.input_path).name
+                self.video_progress[vid_name] = job.progress
+                self.progress_updated.emit(vid_name, job.progress)
+                if job.status.value == "COMPLETED":
+                    self.video_status_updated.emit(vid_name, "Concluído")
+                elif job.status.value == "FAILED":
+                    self.video_status_updated.emit(vid_name, "Falha")
 
             self.timer.stop()
             self.processing_finished.emit()
