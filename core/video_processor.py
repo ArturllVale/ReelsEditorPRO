@@ -260,7 +260,7 @@ class VideoProcessor:
         self.command_builder = FFmpegCommandBuilder()
         self.process_runner = ProcessRunner()
 
-    def process(self, video_path: str, output_dir: str, config: dict, queue=None, cancel_event=None) -> dict:
+    def process(self, video_path: str, output_dir: str, project_or_config, queue=None, cancel_event=None) -> dict:
         video_path_obj = Path(video_path)
         output_dir_obj = Path(output_dir)
         output_filename = f"edited_{video_path_obj.name}"
@@ -273,7 +273,10 @@ class VideoProcessor:
         meta = self.metadata_reader.get_info(str(video_path_obj), ffmpeg_exe)
         vid_w, vid_h, duration, has_audio = meta.width, meta.height, meta.duration, meta.has_audio
 
-        project = Project.from_dict(config)
+        if isinstance(project_or_config, dict):
+            project = Project.from_dict(project_or_config)
+        else:
+            project = project_or_config
         plan = build_composition_plan(project, vid_w, vid_h)
 
         cmd = self.command_builder.build(str(video_path_obj), str(output_path), plan, project.export_settings, has_audio, ffmpeg_exe)
@@ -289,7 +292,7 @@ def get_video_info(filepath):
 def build_ffmpeg_command(video_path, output_path, plan: CompositionPlan, export_settings: ExportSettings, has_audio: bool, ffmpeg_exe=None):
     return FFmpegCommandBuilder().build(video_path, output_path, plan, export_settings, has_audio, ffmpeg_exe)
 
-def editar_video(video_path: str, output_dir: str, config: dict, queue=None, cancel_event=None):
+def editar_video(video_path: str, output_dir: str, project_or_config, queue=None, cancel_event=None):
     processor = VideoProcessor()
-    return processor.process(video_path, output_dir, config, queue, cancel_event)
+    return processor.process(video_path, output_dir, project_or_config, queue, cancel_event)
 

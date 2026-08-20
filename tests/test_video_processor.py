@@ -75,3 +75,40 @@ def test_build_ffmpeg_command_full_effects(tmp_path):
     assert '-r' in cmd
     assert '30' in cmd
     assert 'h264_nvenc' in cmd
+
+from unittest.mock import patch
+
+def test_process_uses_project_directly(tmp_path):
+    video_path = tmp_path / "test.mp4"
+    video_path.write_bytes(b"")
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    project = Project()
+    project.export_settings.codec = "libx264"
+
+    from core.video_processor import VideoProcessor
+    from domain.models import VideoMetadata
+
+    processor = VideoProcessor()
+
+    with patch.object(processor.metadata_reader, 'get_info') as mock_get_info, \
+         patch.object(processor.command_builder, 'build') as mock_build, \
+         patch.object(processor.process_runner, 'run') as mock_run, \
+         patch('core.video_processor.Project.from_dict') as mock_from_dict:
+
+        mock_meta = VideoMetadata()
+        mock_meta.width = 1920
+        mock_meta.height = 1080
+        mock_meta.duration = 10.0
+        mock_meta.has_audio = True
+        mock_get_info.return_value = mock_meta
+
+        mock_build.return_value = ["ffmpeg", "dummy"]
+
+        # Act
+        processor.process(str(video_path), str(output_dir), project)
+
+        # Assert
+        mock_from_dict.assert_not_called()
+        mock_build.assert_called_once()
