@@ -217,10 +217,24 @@ class FFmpegCommandBuilder:
         return cmd
 
 class ProcessRunner:
-    def run(self, cmd: list[str], duration: float, queue, video_name: str):
+    def run(self, cmd: list[str], duration: float, queue, video_name: str, cancel_event=None):
+        import threading
+        import time
+        import subprocess
         process = subprocess.Popen(cmd, stderr=subprocess.PIPE, text=True, universal_newlines=True, encoding='utf-8', errors='ignore')
         time_regex = re.compile(r"time=(\d+):(\d+):(\d+\.\d+)")
         
+        def monitor():
+            while process.poll() is None:
+                if cancel_event and cancel_event.is_set():
+                    process.terminate()
+                    break
+                time.sleep(0.1)
+
+        if cancel_event:
+            t = threading.Thread(target=monitor, daemon=True)
+            t.start()
+
         for line in process.stderr:
             match = time_regex.search(line)
             if match and duration > 0 and queue:
@@ -230,8 +244,13 @@ class ProcessRunner:
                 queue.put((video_name, pct))
 
         process.wait()
+
+        if cancel_event and cancel_event.is_set():
+            raise Exception("CANCELLED")
+
         if process.returncode != 0:
-            raise Exception(f"FFmpeg error: {process.stderr.read() if process.stderr else ''}")
+            err_msg = process.stderr.read() if process.stderr else ""
+            raise Exception(f"FFmpeg error: {err_msg}")
 
         if queue:
             queue.put((video_name, 100))
@@ -242,11 +261,14 @@ class VideoProcessor:
         self.command_builder = FFmpegCommandBuilder()
         self.process_runner = ProcessRunner()
 
-    def process(self, video_path: str, output_dir: str, config: dict, queue=None) -> dict:
+    def process(self, video_path: str, output_dir: str, config: dict, queue=None, cancel_event=None) -> dict:
         video_path_obj = Path(video_path)
         output_dir_obj = Path(output_dir)
         output_filename = f"edited_{video_path_obj.name}"
         output_path = output_dir_obj / output_filename
+
+        if cancel_event and cancel_event.is_set():
+            raise Exception("CANCELLED")
 
         ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
         meta = self.metadata_reader.get_info(str(video_path_obj), ffmpeg_exe)
@@ -257,7 +279,7 @@ class VideoProcessor:
 
         cmd = self.command_builder.build(str(video_path_obj), str(output_path), plan, project.export_settings, has_audio, ffmpeg_exe)
 
-        self.process_runner.run(cmd, duration, queue, video_path_obj.name)
+        self.process_runner.run(cmd, duration, queue, video_path_obj.name, cancel_event)
 
         return {"status": "success", "file": video_path_obj.name, "output": str(output_path)}
 
@@ -268,7 +290,7 @@ def get_video_info(filepath):
 def build_ffmpeg_command(video_path, output_path, plan: CompositionPlan, export_settings: ExportSettings, has_audio: bool, ffmpeg_exe=None):
     return FFmpegCommandBuilder().build(video_path, output_path, plan, export_settings, has_audio, ffmpeg_exe)
 
-def editar_video(video_path: str, output_dir: str, config: dict, queue=None):
+def editar_video(video_path: str, output_dir: str, config: dict, queue=None, cancel_event=None):
     processor = VideoProcessor()
-    return processor.process(video_path, output_dir, config, queue)
+    return processor.process(video_path, output_dir, config, queue, cancel_event)
 

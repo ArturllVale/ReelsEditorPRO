@@ -31,6 +31,7 @@ class RenderScheduler:
         self.jobs = {}
         self.manager = multiprocessing.Manager()
         self.queue = None
+        self.cancel_events = {}
 
     def start(self, videos, output_dir, config, num_workers):
         gpu_accel = config.get("export", {}).get("use_gpu_acceleration", False)
@@ -42,6 +43,7 @@ class RenderScheduler:
         self.executor = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
         self.futures = {}
         self.jobs = {}
+        self.cancel_events = {}
         self.queue = self.manager.Queue()
 
         for video_path in videos:
@@ -52,7 +54,10 @@ class RenderScheduler:
             job = Job(id=job_id, input_path=video_path, output_path=output_path, status=JobStatus.QUEUED)
             self.jobs[name] = job
 
-            future = self.executor.submit(editar_video, video_path, output_dir, config, self.queue)
+            cancel_event = self.manager.Event()
+            self.cancel_events[name] = cancel_event
+
+            future = self.executor.submit(editar_video, video_path, output_dir, config, self.queue, cancel_event)
             self.futures[future] = name
 
     def _process_queue(self):
@@ -99,21 +104,35 @@ class RenderScheduler:
 
     def cancel(self):
         if self.executor:
-            # Terminate active processes
-            for proc in self.executor._processes.values():
-                proc.terminate()
+            # Signal cancel to all jobs
+            for cancel_event in self.cancel_events.values():
+                cancel_event.set()
 
-            # Cancel futures
+            # Cancel futures (prevents queued ones from starting)
             for future, vid_name in self.futures.items():
                 if not future.done():
                     future.cancel()
                     if vid_name in self.jobs:
                         job = self.jobs[vid_name]
-                        job.status = JobStatus.CANCELLED
+                        if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
+                            job.status = JobStatus.CANCELLED
 
+            # Use shutdown with wait=False but without process termination
+            # The processes will terminate because of the cancel_event
             self.executor.shutdown(wait=False, cancel_futures=True)
             self.executor = None
             self.futures = {}
+
+            # Clean up outputs for cancelled or processing jobs
+            import os
+            for name, job in self.jobs.items():
+                if job.status in [JobStatus.QUEUED, JobStatus.PROCESSING, JobStatus.CANCELLED]:
+                    job.status = JobStatus.CANCELLED
+                    if os.path.exists(job.output_path):
+                        try:
+                            os.remove(job.output_path)
+                        except Exception:
+                            pass
 
     def is_finished(self):
         if not self.futures:
