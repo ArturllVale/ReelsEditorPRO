@@ -1,7 +1,9 @@
 import sys
 import os
-from PySide6.QtWidgets import QApplication
+import subprocess
+from PySide6.QtWidgets import QApplication, QMessageBox
 from ui.main_window import MainWindow
+
 
 
 def main():
@@ -14,6 +16,8 @@ def main():
             app.setStyleSheet(f.read())
             
     window = MainWindow()
+    
+
     window.show()
     sys.exit(app.exec())
 
