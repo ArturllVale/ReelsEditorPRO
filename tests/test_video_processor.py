@@ -112,3 +112,61 @@ def test_process_uses_project_directly(tmp_path):
         # Assert
         mock_from_dict.assert_not_called()
         mock_build.assert_called_once()
+
+import pytest
+from core.video_processor import ProcessRunner
+
+def test_process_runner_success(tmp_path):
+    runner = ProcessRunner()
+    # Simple command that exits with 0 and prints some stderr (FFmpeg style)
+    script_path = tmp_path / "mock_ffmpeg.py"
+    script_path.write_text("import sys; sys.stderr.write('frame=1 time=00:00:01.00\\nDone\\n')")
+
+    cmd = ["python", str(script_path)]
+
+    # Should not raise any exception
+    runner.run(cmd, duration=10, queue=None, video_name="test")
+
+def test_process_runner_error(tmp_path):
+    runner = ProcessRunner()
+    # Command that exits with 1 and prints an error
+    script_path = tmp_path / "mock_error.py"
+    script_path.write_text("import sys; sys.stderr.write('Some error occurred\\n'); sys.exit(42)")
+
+    cmd = ["python", str(script_path)]
+
+    with pytest.raises(Exception) as exc_info:
+        runner.run(cmd, duration=10, queue=None, video_name="test")
+
+    assert "code 42" in str(exc_info.value)
+    assert "Some error occurred" in str(exc_info.value)
+
+def test_process_runner_large_stderr(tmp_path):
+    runner = ProcessRunner()
+    # Command that prints 150 lines and exits with 1
+    script_path = tmp_path / "mock_large.py"
+    script_content = """
+import sys
+for i in range(150):
+    sys.stderr.write(f'Line {i}\\n')
+sys.exit(1)
+"""
+    script_path.write_text(script_content)
+
+    cmd = ["python", str(script_path)]
+
+    with pytest.raises(Exception) as exc_info:
+        runner.run(cmd, duration=10, queue=None, video_name="test")
+
+    exc_msg = str(exc_info.value)
+
+    # Should only contain the last 100 lines (Line 50 to Line 149)
+    assert "Line 0" not in exc_msg
+    assert "Line 49" not in exc_msg
+    assert "Line 50" in exc_msg
+    assert "Line 149" in exc_msg
+    assert "code 1" in exc_msg
+
+    # Check that there are exactly 100 lines + 1 line for the exception message (FFmpeg error...)
+    lines = exc_msg.split('\n')
+    assert len(lines) == 101
