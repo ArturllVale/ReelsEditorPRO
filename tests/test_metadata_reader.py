@@ -1,7 +1,8 @@
 from unittest.mock import patch, MagicMock
-from core.video_processor import MetadataReader
+from core.video_processor import MetadataReader, MetadataError
 from domain.models import VideoMetadata
 import json
+import pytest
 
 def test_metadata_reader_ffprobe_success():
     reader = MetadataReader()
@@ -91,7 +92,7 @@ def test_metadata_reader_ffprobe_failure_fallback():
     mock_ffmpeg_output = "Duration: 00:01:30.50, start: 0.000000, bitrate: 1000 kb/s\nStream #0:0(und): Video: h264 (Main) (avc1 / 0x31637661), yuv420p(tv, bt709), 1920x1080 [SAR 1:1 DAR 16:9], 1000 kb/s, 30 fps, 30 tbr, 15360 tbn, 60 tbc (default)\nAudio: aac"
 
     def side_effect(cmd, **kwargs):
-        if cmd[0] == 'ffprobe':
+        if 'ffprobe' in cmd[0]:
             res = MagicMock()
             res.returncode = 1
             return res
@@ -110,3 +111,83 @@ def test_metadata_reader_ffprobe_failure_fallback():
             assert meta.duration == 90.5
             assert meta.has_audio is True
             assert mock_run.call_count == 2
+
+
+def test_metadata_reader_ffprobe_unavailable_fallback_fails():
+    reader = MetadataReader()
+    mock_ffmpeg_output = "No valid video stream here"
+
+    def side_effect(cmd, **kwargs):
+        if 'ffprobe' in cmd[0]:
+            res = MagicMock()
+            res.returncode = 1
+            return res
+        else:
+            res = MagicMock()
+            res.returncode = 0
+            res.stderr = mock_ffmpeg_output
+            return res
+
+    with patch('subprocess.run', side_effect=side_effect):
+        with patch('imageio_ffmpeg.get_ffmpeg_exe', return_value='ffmpeg'):
+            with pytest.raises(MetadataError) as exc:
+                reader.get_info("test.mp4")
+
+            assert "Cannot determine video dimensions" in str(exc.value)
+
+def test_metadata_reader_ffprobe_success_but_no_dimensions():
+    reader = MetadataReader()
+
+    # ffprobe returns valid JSON but no width/height
+    mock_ffprobe_output = json.dumps({
+        "format": {},
+        "streams": [
+            {
+                "codec_type": "audio",
+                "codec_name": "aac"
+            }
+        ]
+    })
+
+    # FFmpeg fallback also fails
+    mock_ffmpeg_output = "Audio: aac"
+
+    def side_effect(cmd, **kwargs):
+        if 'ffprobe' in cmd[0]:
+            res = MagicMock()
+            res.returncode = 0
+            res.stdout = mock_ffprobe_output
+            return res
+        else:
+            res = MagicMock()
+            res.returncode = 0
+            res.stderr = mock_ffmpeg_output
+            return res
+
+    with patch('subprocess.run', side_effect=side_effect):
+        with patch('imageio_ffmpeg.get_ffmpeg_exe', return_value='ffmpeg'):
+            with pytest.raises(MetadataError) as exc:
+                reader.get_info("test.mp4")
+
+            assert "Cannot determine video dimensions" in str(exc.value)
+
+def test_metadata_reader_corrupt_video():
+    reader = MetadataReader()
+
+    def side_effect(cmd, **kwargs):
+        if 'ffprobe' in cmd[0]:
+            res = MagicMock()
+            res.returncode = 1
+            return res
+        else:
+            res = MagicMock()
+            res.returncode = 1
+            res.stderr = "moov atom not found"
+            return res
+
+    with patch('subprocess.run', side_effect=side_effect):
+        with patch('imageio_ffmpeg.get_ffmpeg_exe', return_value='ffmpeg'):
+            with pytest.raises(MetadataError) as exc:
+                reader.get_info("corrupted.mp4")
+
+            assert "Cannot determine video dimensions" in str(exc.value)

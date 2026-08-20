@@ -9,11 +9,26 @@ import imageio_ffmpeg
 from domain.models import Project, ExportSettings, VideoMetadata
 from domain.composition import build_composition_plan, CompositionPlan, RenderElement
 
+
+class MetadataError(Exception):
+    pass
+
 class MetadataReader:
+
     def get_info(self, filepath: str, ffmpeg_exe: str = None) -> VideoMetadata:
+        if ffmpeg_exe is None:
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+
+        ffprobe_exe = 'ffprobe'
+        if ffmpeg_exe:
+            ffmpeg_dir = os.path.dirname(ffmpeg_exe)
+            potential_ffprobe = os.path.join(ffmpeg_dir, 'ffprobe.exe' if os.name == 'nt' else 'ffprobe')
+            if os.path.isfile(potential_ffprobe):
+                ffprobe_exe = potential_ffprobe
+
         try:
             # Try ffprobe first
-            cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', str(filepath)]
+            cmd = [ffprobe_exe, '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', str(filepath)]
             res = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
 
             if res.returncode == 0 and res.stdout:
@@ -55,7 +70,10 @@ class MetadataReader:
                         meta.has_audio = True
                         if 'codec_name' in stream: meta.audio_codec = stream['codec_name']
 
-                return meta
+                if meta.width > 0 and meta.height > 0:
+                    return meta
+                else:
+                    logging.warning(f"FFprobe succeeded but could not determine dimensions for {filepath}. Falling back to FFmpeg regex parsing.")
             else:
                 logging.warning(f"FFprobe failed with return code {res.returncode}. Falling back to FFmpeg regex parsing.")
         except Exception as e:
@@ -83,9 +101,7 @@ class MetadataReader:
             meta.width = int(dim_match.group(1))
             meta.height = int(dim_match.group(2))
         else:
-            logging.error(f"Cannot determine video dimensions for {filepath}. Falling back to 1920x1080.")
-            meta.width = 1920
-            meta.height = 1080
+            raise MetadataError(f"Cannot determine video dimensions for {filepath}. File might be corrupted or missing video stream.\nFFmpeg output:\n{output}")
 
         meta.has_audio = "Audio:" in output
         return meta
