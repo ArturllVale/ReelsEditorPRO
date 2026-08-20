@@ -35,10 +35,11 @@ class RenderScheduler:
         self.queue = None
         self.cancel_events = {}
 
-    def start(self, videos, output_dir, config, num_workers):
-        codec = config.get("codec") if isinstance(config, dict) else None
-        if not codec and isinstance(config, dict):
-            codec = config.get("export", {}).get("codec", "libx264")
+    def start(self, videos, output_dir, project_or_config, num_workers):
+        if isinstance(project_or_config, dict):
+            codec = project_or_config.get("codec") or project_or_config.get("export", {}).get("codec", "libx264")
+        else:
+            codec = project_or_config.export_settings.codec if hasattr(project_or_config, 'export_settings') else "libx264"
         if not codec:
             codec = "libx264"
 
@@ -69,7 +70,7 @@ class RenderScheduler:
             cancel_event = self.manager.Event()
             self.cancel_events[name] = cancel_event
 
-            future = self.executor.submit(editar_video, video_path, output_dir, config, self.queue, cancel_event)
+            future = self.executor.submit(editar_video, video_path, output_dir, project_or_config, self.queue, cancel_event)
             self.futures[future] = name
 
     def _process_queue(self):

@@ -360,12 +360,12 @@ class MainWindow(QMainWindow):
         self.video_progress.clear()
         
         num_workers = self.spin_workers.value()
-        config = self._get_current_config()
+        project = self._get_current_project()
         
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat(f"Iniciando {len(videos)} vídeos...")
         
-        self.render_service.start_processing(videos, output_dir, config, num_workers)
+        self.render_service.start_processing(videos, output_dir, project, num_workers)
 
 
 

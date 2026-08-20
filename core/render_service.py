@@ -17,14 +17,14 @@ class RenderService(QObject):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._check_progress)
 
-    def start_processing(self, videos, output_dir, config, num_workers):
+    def start_processing(self, videos, output_dir, project_or_config, num_workers):
         self.video_progress.clear()
         for video_path in videos:
             name = Path(video_path).name
             self.video_progress[name] = 0
 
         # Start now doesn't need to take the self.progress_queue, it creates its own internally
-        self.scheduler.start(videos, output_dir, config, num_workers)
+        self.scheduler.start(videos, output_dir, project_or_config, num_workers)
         self.timer.start(500)
 
     def cancel_processing(self):
