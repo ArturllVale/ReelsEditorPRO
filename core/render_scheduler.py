@@ -1,39 +1,125 @@
 import concurrent.futures
+import uuid
+import multiprocessing
+from enum import Enum
+from dataclasses import dataclass
+from typing import Optional, Dict, Any
 from pathlib import Path
 from core.video_processor import editar_video
+
+class JobStatus(Enum):
+    QUEUED = "QUEUED"
+    PROCESSING = "PROCESSING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+@dataclass
+class Job:
+    id: str
+    input_path: str
+    output_path: str
+    status: JobStatus = JobStatus.QUEUED
+    progress: int = 0
+    error: Optional[str] = None
+    result: Optional[Dict[str, Any]] = None
 
 class RenderScheduler:
     def __init__(self):
         self.executor = None
-        self.futures = []
+        self.futures = {}
+        self.jobs = {}
+        self.manager = multiprocessing.Manager()
+        self.queue = None
 
-    def start(self, videos, output_dir, config, queue, num_workers):
-        self.executor = concurrent.futures.ProcessPoolExecutor(max_workers=num_workers)
-        self.futures = []
+    def start(self, videos, output_dir, config, num_workers):
+        gpu_accel = config.get("export", {}).get("use_gpu_acceleration", False)
+        # Handle concurrency: limit for GPU if needed
+        max_workers = num_workers
+        if gpu_accel:
+            max_workers = min(max_workers, 2) # Example: limit GPU concurrency to 2
+
+        self.executor = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
+        self.futures = {}
+        self.jobs = {}
+        self.queue = self.manager.Queue()
+
         for video_path in videos:
-            future = self.executor.submit(editar_video, video_path, output_dir, config, queue)
-            self.futures.append(future)
+            job_id = str(uuid.uuid4())
+            name = Path(video_path).name
+            output_path = str(Path(output_dir) / f"edited_{name}")
+
+            job = Job(id=job_id, input_path=video_path, output_path=output_path, status=JobStatus.QUEUED)
+            self.jobs[name] = job
+
+            future = self.executor.submit(editar_video, video_path, output_dir, config, self.queue)
+            self.futures[future] = name
+
+    def _process_queue(self):
+        updated_jobs = []
+        if self.queue:
+            while not self.queue.empty():
+                try:
+                    vid_name, pct = self.queue.get_nowait()
+                    if vid_name in self.jobs:
+                        job = self.jobs[vid_name]
+                        if job.status == JobStatus.QUEUED or job.status == JobStatus.PROCESSING:
+                            job.status = JobStatus.PROCESSING
+                            job.progress = pct
+                            updated_jobs.append(job)
+                except Exception:
+                    break
+        return updated_jobs
+
+    def get_progress_updates(self):
+        # First process queue messages
+        updated_jobs = self._process_queue()
+
+        # Also check for completed/failed futures
+        done_futures = [f for f in self.futures if f.done()]
+        for future in done_futures:
+            vid_name = self.futures.pop(future)
+            if vid_name in self.jobs:
+                job = self.jobs[vid_name]
+                # Only update if not already terminal
+                if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED):
+                    try:
+                        result = future.result()
+                        job.status = JobStatus.COMPLETED
+                        job.progress = 100
+                        job.result = result
+                    except concurrent.futures.CancelledError:
+                        job.status = JobStatus.CANCELLED
+                    except Exception as e:
+                        job.status = JobStatus.FAILED
+                        job.error = str(e)
+                    updated_jobs.append(job)
+
+        return updated_jobs
 
     def cancel(self):
         if self.executor:
-            # Terminar os processos
+            # Terminate active processes
             for proc in self.executor._processes.values():
                 proc.terminate()
+
+            # Cancel futures
+            for future, vid_name in self.futures.items():
+                if not future.done():
+                    future.cancel()
+                    if vid_name in self.jobs:
+                        job = self.jobs[vid_name]
+                        job.status = JobStatus.CANCELLED
+
             self.executor.shutdown(wait=False, cancel_futures=True)
             self.executor = None
-            self.futures = []
+            self.futures = {}
 
     def is_finished(self):
         if not self.futures:
             return True
-        return all(future.done() for future in self.futures)
+        return len(self.futures) == 0
 
     def get_results(self):
-        results = []
-        for future in self.futures:
-            if future.done():
-                try:
-                    results.append(future.result())
-                except Exception as e:
-                    results.append({"status": "error", "error": str(e)})
-        return results
+        # We can just return the jobs list
+        return list(self.jobs.values())

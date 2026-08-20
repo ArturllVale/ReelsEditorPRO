@@ -6,16 +6,21 @@ from unittest.mock import patch, MagicMock
 def render_service():
     return RenderService()
 
+from core.render_scheduler import Job, JobStatus
+
+from core.render_scheduler import Job, JobStatus
+
 def test_render_service_batch_success(qtbot, render_service):
     videos = ['video1.mp4', 'video2.mp4', 'video3.mp4']
 
-    with patch('core.render_scheduler.RenderScheduler.start') as mock_start, \
-         patch('core.render_scheduler.RenderScheduler.is_finished', return_value=True), \
-         patch('core.render_scheduler.RenderScheduler.get_results', return_value=[
-             {"status": "success", "file": "video1.mp4"},
-             {"status": "success", "file": "video2.mp4"},
-             {"status": "error", "file": "video3.mp4"}
-         ]):
+    # We need to patch get_progress_updates to return mock Jobs since we changed the RenderScheduler interface
+    mock_jobs = [
+        Job(id="1", input_path="video1.mp4", output_path="", status=JobStatus.COMPLETED, progress=100),
+        Job(id="2", input_path="video2.mp4", output_path="", status=JobStatus.COMPLETED, progress=100),
+        Job(id="3", input_path="video3.mp4", output_path="", status=JobStatus.FAILED, progress=50),
+    ]
+
+    with patch('core.render_scheduler.RenderScheduler.start') as mock_start,          patch('core.render_scheduler.RenderScheduler.is_finished', return_value=True),          patch('core.render_scheduler.RenderScheduler.get_progress_updates', side_effect=[mock_jobs, []]):
 
         progress_calls = []
         status_calls = []
