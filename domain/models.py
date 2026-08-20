@@ -3,6 +3,19 @@ from typing import List, Dict, Any, Optional
 
 
 @dataclass
+class VideoMetadata:
+    """Metadados extraídos do vídeo."""
+    width: int = 0
+    height: int = 0
+    duration: float = 0.0
+    fps: float = 0.0
+    codec: str = ""
+    has_audio: bool = False
+    audio_codec: str = ""
+    rotation: int = 0
+
+
+@dataclass
 class Media:
     """Representa a lista de mídias/vídeos no projeto de edição."""
     paths: List[str] = field(default_factory=list)
