@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Dict, Any
+from typing import List, Dict, Any, ClassVar, Union
 
 
 @dataclass
@@ -70,11 +70,33 @@ class Layers:
 @dataclass
 class ExportSettings:
     """Configurações de exportação do projeto."""
+    MAX_GPU_WORKERS: ClassVar[int] = 2
+    GPU_CODECS: ClassVar[set] = {"h264_nvenc", "h264_amf"}
+
     output_dir: str = ""
     bitrate: str = "Original"
     codec: str = "libx264"
     keep_fps: bool = True
     num_workers: int = 1
+
+    @property
+    def acceleration_type(self) -> str:
+        """Retorna o tipo de aceleração de hardware associado ao codec."""
+        if self.codec == "h264_nvenc":
+            return "NVIDIA"
+        elif self.codec == "h264_amf":
+            return "AMD"
+        return "CPU"
+
+    def is_gpu_codec(self_or_codec: Union[str, "ExportSettings"] = None) -> bool:
+        """Determina se o codec informado (ou da instância) utiliza aceleração de GPU."""
+        if self_or_codec is None:
+            return False
+        if isinstance(self_or_codec, ExportSettings):
+            return self_or_codec.codec in ExportSettings.GPU_CODECS
+        if isinstance(self_or_codec, str):
+            return self_or_codec in ExportSettings.GPU_CODECS
+        return False
 
 
 @dataclass
