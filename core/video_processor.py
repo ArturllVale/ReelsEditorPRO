@@ -1,35 +1,95 @@
 import os
 import re
 import subprocess
+import json
+import logging
 from pathlib import Path
 import imageio_ffmpeg
 from proglog import ProgressBarLogger
 
-from domain.models import Project, ExportSettings
+from domain.models import Project, ExportSettings, VideoMetadata
 from domain.composition import build_composition_plan, CompositionPlan, RenderElement
 
 class MetadataReader:
-    def get_info(self, filepath: str, ffmpeg_exe: str = None):
+    def get_info(self, filepath: str, ffmpeg_exe: str = None) -> VideoMetadata:
+        try:
+            # Try ffprobe first
+            cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', str(filepath)]
+            res = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+
+            if res.returncode == 0 and res.stdout:
+                data = json.loads(res.stdout)
+                meta = VideoMetadata()
+
+                # Format level info
+                fmt = data.get('format', {})
+                if 'duration' in fmt:
+                    meta.duration = float(fmt['duration'])
+
+                # Stream level info
+                streams = data.get('streams', [])
+                for stream in streams:
+                    codec_type = stream.get('codec_type')
+                    if codec_type == 'video':
+                        if 'width' in stream: meta.width = int(stream['width'])
+                        if 'height' in stream: meta.height = int(stream['height'])
+                        if 'codec_name' in stream: meta.codec = stream['codec_name']
+
+                        # Calculate FPS
+                        if 'r_frame_rate' in stream:
+                            num, den = stream['r_frame_rate'].split('/')
+                            if int(den) > 0:
+                                meta.fps = float(num) / float(den)
+
+                        # Handle rotation from tags/side_data
+                        tags = stream.get('tags', {})
+                        if 'rotate' in tags:
+                            meta.rotation = int(tags['rotate'])
+                        else:
+                            side_data = stream.get('side_data_list', [])
+                            for sd in side_data:
+                                if sd.get('side_data_type') == 'Display Matrix' and 'rotation' in sd:
+                                    # FFprobe side data rotation is sometimes float like "-90.000000"
+                                    meta.rotation = int(float(sd['rotation']))
+                                    break
+                    elif codec_type == 'audio':
+                        meta.has_audio = True
+                        if 'codec_name' in stream: meta.audio_codec = stream['codec_name']
+
+                return meta
+            else:
+                logging.warning(f"FFprobe failed with return code {res.returncode}. Falling back to FFmpeg regex parsing.")
+        except Exception as e:
+            logging.warning(f"Error extracting metadata with FFprobe: {e}. Falling back to FFmpeg regex parsing.")
+
+        # Fallback to FFmpeg regex parsing
+        return self._get_info_fallback(filepath, ffmpeg_exe)
+
+    def _get_info_fallback(self, filepath: str, ffmpeg_exe: str = None) -> VideoMetadata:
         if ffmpeg_exe is None:
             ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
         cmd = [ffmpeg_exe, "-hide_banner", "-i", str(filepath)]
         res = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
         output = res.stderr
         
-        duration = 0.0
+        meta = VideoMetadata()
+
         duration_match = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", output)
         if duration_match:
             h, m, s = duration_match.groups()
-            duration = int(h)*3600 + int(m)*60 + float(s)
+            meta.duration = int(h)*3600 + int(m)*60 + float(s)
 
-        w, h = 1920, 1080
         dim_match = re.search(r"Stream.*Video.*?\s(\d+)x(\d+)[\s,]", output)
         if dim_match:
-            w = int(dim_match.group(1))
-            h = int(dim_match.group(2))
+            meta.width = int(dim_match.group(1))
+            meta.height = int(dim_match.group(2))
+        else:
+            logging.error(f"Cannot determine video dimensions for {filepath}. Falling back to 1920x1080.")
+            meta.width = 1920
+            meta.height = 1080
 
-        has_audio = "Audio:" in output
-        return w, h, duration, has_audio
+        meta.has_audio = "Audio:" in output
+        return meta
 
 class MirrorFilter:
     def apply(self, curr_video: str) -> tuple[str, str]:
@@ -189,7 +249,8 @@ class VideoProcessor:
         output_path = output_dir_obj / output_filename
 
         ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-        vid_w, vid_h, duration, has_audio = self.metadata_reader.get_info(str(video_path_obj), ffmpeg_exe)
+        meta = self.metadata_reader.get_info(str(video_path_obj), ffmpeg_exe)
+        vid_w, vid_h, duration, has_audio = meta.width, meta.height, meta.duration, meta.has_audio
 
         project = Project.from_dict(config)
         plan = build_composition_plan(project, vid_w, vid_h)
