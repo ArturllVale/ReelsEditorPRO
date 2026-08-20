@@ -1,3 +1,4 @@
+from unittest.mock import patch
 import sys
 import pytest
 from PySide6.QtWidgets import QApplication
@@ -50,3 +51,24 @@ def test_card_status_update(qapp, tmp_path):
 
     card.update_status('Falha')
     assert card.lbl_status.text() == 'Falha'
+
+
+def test_debounce_preview_updates(qapp, qtbot):
+    with patch.object(MainWindow, '_do_update_previews') as mock_do_update:
+        window = MainWindow()
+        qtbot.addWidget(window)
+
+        # Simulate multiple rapid property changes
+        window.chk_mirror.setChecked(not window.chk_mirror.isChecked())
+        window.chk_overlay.setChecked(not window.chk_overlay.isChecked())
+        window.spin_overlay_x.setValue(window.spin_overlay_x.value() + 10)
+        window.spin_scale.setValue(window.spin_scale.value() + 10)
+
+        # Method should not be called immediately due to debounce
+        mock_do_update.assert_not_called()
+
+        # Wait for the timer (75ms) + some margin
+        qtbot.wait(150)
+
+        # Method should be called exactly once
+        assert mock_do_update.call_count == 1

@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QGroupBox, QCheckBox, QLineEdit, QPushButton, QComboBox, 
                              QSpinBox, QProgressBar, QTextEdit, QLabel, QFileDialog, 
                              QHeaderView, QTableWidgetItem, QMessageBox, QGridLayout, QScrollArea, QTableWidget, QAbstractItemView)
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction
 
 from domain.models import Project
@@ -20,6 +20,10 @@ class MainWindow(QMainWindow):
         self.config_manager = ConfigManager()
         self.render_service = RenderService()
         self.video_progress = {}
+
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.timeout.connect(self._do_update_previews)
 
         self._create_menu()
         self._setup_ui()
@@ -246,7 +250,10 @@ class MainWindow(QMainWindow):
     def _get_current_config(self):
         return self._get_current_project().to_config_dict()
 
-    def _update_previews(self):
+    def _update_previews(self, *args):
+        self._preview_timer.start(75)
+
+    def _do_update_previews(self):
         project = self._get_current_project()
         for card in self.grid_area.cards:
             card.apply_preview(project)
