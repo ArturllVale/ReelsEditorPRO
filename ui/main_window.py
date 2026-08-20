@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
 from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QAction, QIcon
 
+from domain.models import Project
 from ui.custom_widgets import VideoGridArea
 from utils.config_manager import ConfigManager
 from core.render_service import RenderService
@@ -240,48 +241,16 @@ class MainWindow(QMainWindow):
         self.render_service.processing_finished.connect(self._on_processing_finished)
         self.render_service.processing_cancelled.connect(self._on_processing_cancelled)
 
+    def _get_current_project(self) -> Project:
+        return Project.from_ui(self)
+
     def _get_current_config(self):
-        codec_map = {"CPU (libx264)": "libx264", "GPU NVIDIA (h264_nvenc)": "h264_nvenc", "GPU AMD (h264_amf)": "h264_amf"}
-        extra_imgs = []
-        for row in range(self.table_extra_imgs.rowCount()):
-            extra_imgs.append({
-                "path": self.table_extra_imgs.item(row, 0).text(),
-                "scale": self.table_extra_imgs.cellWidget(row, 1).value(),
-                "pos_x": self.table_extra_imgs.cellWidget(row, 2).value(),
-                "pos_y": self.table_extra_imgs.cellWidget(row, 3).value(),
-                "opacity": self.table_extra_imgs.cellWidget(row, 4).value() if self.table_extra_imgs.cellWidget(row, 4) else 100
-            })
-
-        texts = []
-        for row in range(self.table_texts.rowCount()):
-            texts.append({
-                "content": self.table_texts.cellWidget(row, 0).text(),
-                "size": self.table_texts.cellWidget(row, 1).value(),
-                "color": self.table_texts.cellWidget(row, 2).text(),
-                "x": self.table_texts.cellWidget(row, 3).value(),
-                "y": self.table_texts.cellWidget(row, 4).value(),
-                "opacity": self.table_texts.cellWidget(row, 5).value(),
-                "shadow": self.table_texts.cellWidget(row, 6).layout().itemAt(0).widget().isChecked()
-            })
-
-        return {
-            "enable_mirror": self.chk_mirror.isChecked(),
-            "enable_overlay": self.chk_overlay.isChecked(),
-            "overlay_path": self.txt_overlay_path.text(),
-            "overlay_x": self.spin_overlay_x.value(),
-            "overlay_y": self.spin_overlay_y.value(),
-            "overlay_scale": self.spin_scale.value(),
-            "bitrate": self.cmb_bitrate.currentText(),
-            "keep_fps": self.chk_fps.isChecked(),
-            "codec": codec_map.get(self.cmb_codec.currentText(), "libx264"),
-            "texts": texts,
-            "extra_images": extra_imgs
-        }
+        return self._get_current_project().to_config_dict()
 
     def _update_previews(self):
-        cfg = self._get_current_config()
+        project = self._get_current_project()
         for card in self.grid_area.cards:
-            card.apply_preview(cfg)
+            card.apply_preview(project)
 
     def _add_extra_image(self):
         f, _ = QFileDialog.getOpenFileName(self, "Selecionar Imagem Extra", "", "Imagens (*.png *.jpg *.jpeg)")
