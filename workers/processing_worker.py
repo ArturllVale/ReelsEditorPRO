@@ -1,4 +1,3 @@
-import time
 import concurrent.futures
 from PySide6.QtCore import QThread, Signal
 from core.video_processor import editar_video
