@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QSpinBox, QProgressBar, QTextEdit, QLabel, QFileDialog, 
                              QHeaderView, QTableWidgetItem, QMessageBox, QGridLayout, QScrollArea, QTableWidget, QAbstractItemView)
 from PySide6.QtCore import Qt, QTimer
+from core.hardware_detector import HardwareEncoderDetector
 from PySide6.QtGui import QAction
 
 from domain.models import Project
@@ -196,7 +197,23 @@ class MainWindow(QMainWindow):
         
         export_layout.addWidget(QLabel("Aceleração / Codec:"), 3, 0)
         self.cmb_codec = QComboBox()
-        self.cmb_codec.addItems(["CPU (libx264)", "GPU NVIDIA (h264_nvenc)", "GPU AMD (h264_amf)"])
+
+        # Detector de codecs suportados pelo FFmpeg
+        detector = HardwareEncoderDetector()
+        supported = detector.get_supported_encoders()
+
+        options = []
+        if "libx264" in supported:
+            options.append("CPU (libx264)")
+        if "h264_nvenc" in supported:
+            options.append("GPU NVIDIA (h264_nvenc)")
+        if "h264_amf" in supported:
+            options.append("GPU AMD (h264_amf)")
+
+        if not options:
+            options.append("CPU (libx264)") # fallback minimo
+
+        self.cmb_codec.addItems(options)
         export_layout.addWidget(self.cmb_codec, 3, 1)
         
         self.chk_fps = QCheckBox("Manter FPS")
