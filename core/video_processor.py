@@ -220,6 +220,7 @@ class ProcessRunner:
         import threading
         import time
         import subprocess
+        import collections
         process = subprocess.Popen(cmd, stderr=subprocess.PIPE, text=True, universal_newlines=True, encoding='utf-8', errors='ignore')
         time_regex = re.compile(r"time=(\d+):(\d+):(\d+\.\d+)")
         
@@ -234,7 +235,10 @@ class ProcessRunner:
             t = threading.Thread(target=monitor, daemon=True)
             t.start()
 
+        stderr_tail = collections.deque(maxlen=100)
+
         for line in process.stderr:
+            stderr_tail.append(line.rstrip('\n'))
             match = time_regex.search(line)
             if match and duration > 0 and queue:
                 h, m, s = match.groups()
@@ -248,8 +252,8 @@ class ProcessRunner:
             raise Exception("CANCELLED")
 
         if process.returncode != 0:
-            err_msg = process.stderr.read() if process.stderr else ""
-            raise Exception(f"FFmpeg error: {err_msg}")
+            err_msg = "\n".join(stderr_tail)
+            raise Exception(f"FFmpeg error (code {process.returncode}):\n{err_msg}")
 
         if queue:
             queue.put((video_name, 100))
