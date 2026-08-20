@@ -1,34 +1,23 @@
 import os
-import subprocess
 from pathlib import Path
-import imageio_ffmpeg
+import numpy as np
+from moviepy import VideoFileClip
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QGridLayout, 
-                               QPushButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem)
+                               QAbstractItemView, QPushButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem)
 from PySide6.QtCore import Qt, Signal, QUrl, QSizeF
-from PySide6.QtGui import QPixmap, QPainter, QColor, QFont
+from PySide6.QtGui import QImage, QPixmap, QPainter, QColor, QFont
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 
 def get_thumbnail(path):
     try:
-        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-        cmd = [
-            ffmpeg_exe,
-            "-hide_banner",
-            "-loglevel", "error",
-            "-ss", "00:00:00",
-            "-i", str(path),
-            "-vframes", "1",
-            "-f", "image2pipe",
-            "-vcodec", "png",
-            "pipe:1"
-        ]
-        res = subprocess.run(cmd, capture_output=True)
-        if res.returncode == 0 and res.stdout:
-            pixmap = QPixmap()
-            if pixmap.loadFromData(res.stdout):
-                return pixmap
-        return QPixmap()
+        with VideoFileClip(path) as clip:
+            frame = clip.get_frame(0.0)
+            height, width, channel = frame.shape
+            frame = np.copy(frame)
+            bytesPerLine = 3 * width
+            qImg = QImage(frame.data, width, height, bytesPerLine, QImage.Format_RGB888)
+            return QPixmap.fromImage(qImg)
     except Exception as e:
         print(f"Erro thumbnail: {e}")
         return QPixmap()

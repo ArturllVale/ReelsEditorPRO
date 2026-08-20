@@ -1,3 +1,4 @@
+import time
 import pytest
 from workers.processing_worker import ProcessingWorker
 

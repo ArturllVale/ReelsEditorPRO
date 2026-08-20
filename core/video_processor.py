@@ -3,6 +3,7 @@ import re
 import subprocess
 from pathlib import Path
 import imageio_ffmpeg
+from proglog import ProgressBarLogger
 
 def get_video_info(filepath):
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
@@ -71,6 +72,7 @@ def build_ffmpeg_command(video_path, output_path, config, vid_w, vid_h, has_audi
             input_idx += 1
             
     # 4. Texts
+    font_path = "C:/Windows/Fonts/arialbd.ttf".replace(':', '\\:')
     for i, t in enumerate(config.get("texts", [])):
         txt = t.get("content", "")
         if not txt: continue

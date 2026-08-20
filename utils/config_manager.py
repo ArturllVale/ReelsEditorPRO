@@ -35,6 +35,7 @@ class ConfigManager:
             "enable_mirror": True,
             "enable_overlay": True,
             "overlay_path": "",
+            "overlay_position": "Canto Inferior Direito",
             "overlay_scale": 15,
             "bitrate": "Original",
             "keep_fps": True,
